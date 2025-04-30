@@ -23,11 +23,26 @@ parser.add_argument('--data_name',
                     type=str,
                     default='NYU',
                     # default='KITTIDC',
-                    choices=('NYU', 'KITTIDC'),
+                    choices=('NYU', 'KITTIDC', 'FLSea', 'TartanAir'),
                     help='dataset name')
 parser.add_argument('--split_json',
                     type=str,
                     default='../data_json/nyu.json',
+                    # default='../data_json/kitti_dc.json',
+                    help='path to json file')
+parser.add_argument('--split_txt',
+                    type=str,
+                    default='../data_json/nyu.txt',
+                    # default='../data_json/kitti_dc.json',
+                    help='path to json file')
+parser.add_argument('--split_txt_training',
+                    type=str,
+                    default='../data_json/nyu.txt',
+                    # default='../data_json/kitti_dc.json',
+                    help='path to json file')
+parser.add_argument('--split_txt_validation',
+                    type=str,
+                    default='../data_json/nyu.txt',
                     # default='../data_json/kitti_dc.json',
                     help='path to json file')
 parser.add_argument('--patch_height',

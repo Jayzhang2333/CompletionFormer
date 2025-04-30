@@ -9,84 +9,92 @@
 import torch
 from . import BaseMetric
 
-
 class CompletionFormerMetric(BaseMetric):
     def __init__(self, args):
         super(CompletionFormerMetric, self).__init__(args)
 
         self.args = args
-        self.t_valid = 0.0001
+        self.t_valid = 0.1
+        self.max_depth = args.max_depth
 
         self.metric_name = [
-            'RMSE', 'MAE', 'iRMSE', 'iMAE', 'REL', 'D^1', 'D^2', 'D^3', 'D102', 'D105', 'D110'
+            'RMSE', 'MAE', 'iRMSE', 'iMAE', 'iAbsRel', 'REL',
+            'SILog',                         # ← added here
+            'D^1', 'D^2', 'D^3', 'D102', 'D105', 'D110'
         ]
 
     def evaluate(self, sample, output, mode=None):
         with torch.no_grad():
             pred = output['pred'].detach()
-            gt = sample['gt'].detach()
+            gt   = sample['gt'].detach()
 
             pred_inv = 1.0 / (pred + 1e-8)
-            gt_inv = 1.0 / (gt + 1e-8)
+            gt_inv   = 1.0 / (gt   + 1e-8)
 
-            # For numerical stability
-            mask = gt > self.t_valid
-            num_valid = mask.sum()
+            # 1) valid‐pixel mask
+            mask = (gt > self.t_valid) & (gt < self.max_depth)
+            num_valid = mask.sum().float()
 
-            pred = pred[mask]
-            gt = gt[mask]
-
+            # 2) apply mask
+            pred     = pred[mask]
+            gt       = gt[mask]
             pred_inv = pred_inv[mask]
-            gt_inv = gt_inv[mask]
+            gt_inv   = gt_inv[mask]
 
+            # zero out tiny values to avoid inf’s
             pred_inv[pred <= self.t_valid] = 0.0
-            gt_inv[gt <= self.t_valid] = 0.0
+            gt_inv[gt   <= self.t_valid] = 0.0
 
-            # RMSE / MAE
-            diff = pred - gt
-            diff_abs = torch.abs(diff)
-            diff_sqr = torch.pow(diff, 2)
+            # 3) standard RMSE & MAE
+            diff     = pred - gt
+            diff_abs = diff.abs()
+            diff_sqr = diff.pow(2)
 
-            rmse = diff_sqr.sum() / (num_valid + 1e-8)
-            rmse = torch.sqrt(rmse)
+            rmse = torch.sqrt(diff_sqr.mean())
+            mae  = diff_abs.mean()
 
-            mae = diff_abs.sum() / (num_valid + 1e-8)
+            # 4) inverse‐depth metrics: iRMSE, iMAE, iAbsRel
+            diff_inv     = pred_inv - gt_inv
+            diff_inv_abs = diff_inv.abs()
+            diff_inv_sqr = diff_inv.pow(2)
 
-            # iRMSE / iMAE
-            diff_inv = pred_inv - gt_inv
-            diff_inv_abs = torch.abs(diff_inv)
-            diff_inv_sqr = torch.pow(diff_inv, 2)
+            irmse  = torch.sqrt(diff_inv_sqr.mean())
+            imae   = diff_inv_abs.mean()
 
-            irmse = diff_inv_sqr.sum() / (num_valid + 1e-8)
-            irmse = torch.sqrt(irmse)
+            diff_inv_rel = diff_inv_abs / (gt_inv + 1e-8)
+            iabsrel      = diff_inv_rel.mean()
 
-            imae = diff_inv_abs.sum() / (num_valid + 1e-8)
+            # 5) AbsRel on regular depth
+            rel = (diff_abs / (gt + 1e-8)).mean()
 
-            # Rel
-            rel = diff_abs / (gt + 1e-8)
-            rel = rel.sum() / (num_valid + 1e-8)
+            # 6) SILog
+            eps = 1e-8
+            log_pred = torch.log(pred + eps)
+            log_gt   = torch.log(gt   + eps)
+            alpha    = (log_gt - log_pred).mean()
+            silog    = torch.sqrt(((log_pred - log_gt + alpha).pow(2)).mean())
 
-            # delta
-            r1 = gt / (pred + 1e-8)
-            r2 = pred / (gt + 1e-8)
+            # 7) δ thresholds
+            r1    = gt / (pred + eps)
+            r2    = pred / (gt   + eps)
             ratio = torch.max(r1, r2)
 
-            del_1 = (ratio < 1.25).type_as(ratio)
-            del_2 = (ratio < 1.25**2).type_as(ratio)
-            del_3 = (ratio < 1.25**3).type_as(ratio)
-            del_102 = (ratio < 1.02).type_as(ratio)
-            del_105 = (ratio < 1.05).type_as(ratio)
-            del_110 = (ratio < 1.10).type_as(ratio)
+            del_1   = (ratio < 1.25   ).float().mean()
+            del_2   = (ratio < 1.25**2).float().mean()
+            del_3   = (ratio < 1.25**3).float().mean()
+            del_102 = (ratio < 1.02   ).float().mean()
+            del_105 = (ratio < 1.05   ).float().mean()
+            del_110 = (ratio < 1.10   ).float().mean()
 
-            del_1 = del_1.sum() / (num_valid + 1e-8)
-            del_2 = del_2.sum() / (num_valid + 1e-8)
-            del_3 = del_3.sum() / (num_valid + 1e-8)
-            del_102 = del_102.sum() / (num_valid + 1e-8)
-            del_105 = del_105.sum() / (num_valid + 1e-8)
-            del_110 = del_110.sum() / (num_valid + 1e-8)
+            # 8) stack in precisely the same order as metric_name
+            result = torch.stack([
+                rmse, mae,      # RMSE, MAE
+                irmse, imae,    # iRMSE, iMAE
+                iabsrel,        # iAbsRel
+                rel,            # REL
+                silog,          # SILog
+                del_1, del_2, del_3,
+                del_102, del_105, del_110
+            ], dim=0)
 
-            result = [rmse, mae, irmse, imae, rel, del_1, del_2, del_3, del_102, del_105, del_110]
-            result = torch.stack(result)
-            result = torch.unsqueeze(result, dim=0).detach()
-
-        return result
+            return result.unsqueeze(0)

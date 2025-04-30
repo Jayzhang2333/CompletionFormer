@@ -80,6 +80,7 @@ def train(gpu, args):
     # Prepare dataset
     data = get_data(args)
 
+    
     data_train = data(args, 'train')
     data_val = data(args, 'val')
 

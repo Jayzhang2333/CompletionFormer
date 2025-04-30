@@ -1,0 +1,1 @@
+python main.py --dir_data / --data_name TartanAir --split_txt_training /completion_former/tartanair_training.txt --split_txt_validation /completion_former/tartanair_testing.txt --gpus 0 --loss 1.0*L1+1.0*L2 --batch_size 1 --milestones 36 48 56 64 72 --epochs 72 --log_dir ../experiments/ --save tartanair_trail --no_multiprocessing
